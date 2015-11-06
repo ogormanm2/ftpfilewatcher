@@ -4,17 +4,6 @@
    A Node.js application to show an example use of the DirectoryWatcher.js
    Module
 
-   Current Version: 0.0.1
-                    December 19 2013 
-
-   Author(s): George H. Slaterpryce III
-   License: CPOL : The Code Project Open License 1.02
-            http://www.codeproject.com/info/cpol10.aspx
-
-   Copyright: (c) 2013 Slaterpryce Intellect Corp
-
-   If you modify this code please add your name and what was modified to this
-   header, as well as the date modified.
 
    Target Node.js version: v0.10.22
 
@@ -34,7 +23,10 @@ var dirwatch = require("./modules/DirectoryWatcher.js");
 // you can monitor only a single folder and none of its child
 // directories by simply changing the recursive parameter to
 // to false
-var simMonitor = new dirwatch.DirectoryWatcher("C:\\sim", true);
+// Pull in configuration from JSON config file
+var fs = require('fs');
+var appconfig = JSON.parse(fs.readFileSync('config.json', 'utf8'));
+var simMonitor = new dirwatch.DirectoryWatcher(appconfig.sourcedir, true);
 
 // start the monitor and have it check for updates
 // every half second.
@@ -68,12 +60,13 @@ simMonitor.on("fileChanged", function (fileDetail, changes) {
 // log to the console when a file is added.
 simMonitor.on("fileAdded", function (fileDetail) {
   console.log("File Added: " + fileDetail.fullPath);
+    
   // Upload the file to the ftp server
   var Ftp = new JSFtp({
-    host: "192.168.1.82",
-    port: 21, // defaults to 21
-    user: "ftp-user", // defaults to "anonymous"
-    pass: "ftp1234",
+    host: appconfig.ftp.host, //"192.168.1.82",
+    port: appconfig.ftp.port, // defaults to 21
+    user: appconfig.ftp.user, // defaults to "anonymous"
+    pass: appconfig.ftp.password,
     debugMode: true // defaults to "@anonymous"
   });
 
@@ -81,9 +74,11 @@ simMonitor.on("fileAdded", function (fileDetail) {
   Ftp.put(fileDetail.fullPath, fileDetail.fileName, function (err) {
     if (!err) {
       console.log("upload success");
+      // add code to update audit log of success
     }
     else {
       console.log("upload failure");
+      // add queuing code to try again
     }
   });
  
