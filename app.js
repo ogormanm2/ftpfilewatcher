@@ -13,6 +13,12 @@
 // Imports / Requires
 var JSFtp = require("jsftp");
 var dirwatch = require("./modules/DirectoryWatcher.js");
+var kue = require("kue");                                                    
+var jobs = kue.createQueue();
+var cassandra = require('cassandra-driver');
+var async = require('async');
+var client = new cassandra.Client({contactPoints: ['127.0.0.1'], keyspace: 'filewatch'});
+var moment = require('moment');
 
 // Create a monitor object that will watch a directory
 // and all it's sub-directories (recursive) in this case
@@ -63,10 +69,10 @@ simMonitor.on("fileAdded", function (fileDetail) {
     
   // Upload the file to the ftp server
   var Ftp = new JSFtp({
-    host: appconfig.ftp.host, //"192.168.1.82",
-    port: appconfig.ftp.port, // defaults to 21
-    user: appconfig.ftp.user, // defaults to "anonymous"
-    pass: appconfig.ftp.password,
+    host: appconfig.host, //"192.168.1.82",
+    port: appconfig.port, // defaults to 21
+    user: appconfig.user, // defaults to "anonymous"
+    pass: appconfig.password,
     debugMode: true // defaults to "@anonymous"
   });
 
@@ -74,14 +80,95 @@ simMonitor.on("fileAdded", function (fileDetail) {
   Ftp.put(fileDetail.fullPath, fileDetail.fileName, function (err) {
     if (!err) {
       console.log("upload success");
-      // add code to update audit log of success
+      // add code to fileDetail.fullPathupdate audit log of success
+      var newpath = fileDetail.fullPath.replace(/\\/g, '\\\\');
+      var newfile = fileDetail.fileName.replace(/\\/g, '\\\\');
+      cqlCmd = "INSERT INTO ftpfileaudit (job,path,filename,status,datecreated) VALUES " +
+      "(1,'" + newpath + "','" + newfile + "','complete','" + moment().format() + "')";
+     //cqlCmd = "DELETE FROM ftpfileaudit WHERE path = 'test'"
+     client.execute(cqlCmd, function (err, result) {
+           if (!err) {
+               console.log("Audit Updated.");
+           } else {
+               console.log("Audit update failed. Error:", err)
+           }
+       });
+      
     }
     else {
       console.log("upload failure");
-      // add queuing code to try again
+      // add queuing code to try again and audit log of failed job pending 
+      // (including file and date of attempt and # tries)
+      retryFTP('ftpRetry', fileDetail.fullPath, fileDetail.fileName);
+
     }
   });
  
+});
+
+function retryFTP (name, path, fileName){
+ name = name || 'Default_Name';
+ path = path || 'Default_Path';
+ fileName = fileName || 'Default_FileName';
+ var job = jobs.create('ftpRetry', {
+   name: 'ftpRetry',
+   path: path,
+   fileName: fileName
+ });
+ job
+   .on('complete', function (){
+     console.log('Job', job.id, 'with name', job.data.name, 'is    done');
+     var newpath = path.replace(/\\/g, '\\\\');
+     var newfile = fileName.replace(/\\/g, '\\\\');
+     cqlCmd = "INSERT INTO ftpfileaudit (job,path,filename,status,datecreated) VALUES (" +
+      job.id + ",'" + path + "','" + fileName + "','complete','" + Date() + "')";
+     client.execute(cqlCmd, function (err, result) {
+           if (!err) {
+               console.log("Audit Updated.");
+           }
+       });
+   })
+   .on('failed', function (){
+     console.log('Job', job.id, 'with name', job.data.name, 'has  failed');
+     var newpath = path.replace(/\\/g, '\\\\');
+     var newfile = fileName.replace(/\\/g, '\\\\');
+     cqlCmd = "INSERT INTO ftpfileaudit (job,path,filename,status,datecreated) VALUES (" +
+      job.id + ",'" + path + "','" + fileName + "','failed','" + Date() + "')";
+     client.execute(cqlCmd, function (err, result) {
+           if (!err) {
+               console.log("Audit Updated.");
+           }
+       });
+   });
+ job.save();
+}
+jobs.process('ftpRetry', function (job, done){
+ /* carry out all the job function here */
+ // Upload the file to the ftp server
+  var Ftp = new JSFtp({
+    host: appconfig.host, //"192.168.1.82",
+    port: appconfig.port, // defaults to 21
+    user: appconfig.user, // defaults to "anonymous"
+    pass: appconfig.password,
+    debugMode: true // defaults to "@anonymous"
+  });
+
+  console.log("Calling Upload: " + job.data.path); 
+  Ftp.put(job.data.path, job.data.fileName, function (err) {
+    if (!err) {
+      console.log("upload success");
+      // add code to update audit log of success
+      done && done();
+    }
+    else {
+      console.log("upload failure, re-queueing");
+      // add queuing code to try again and audit log of failed job pending 
+      // (including file and date of attempt and # tries)
+      //var err = new Error('FTP connect or send error');
+      done(err);
+    }
+  }); 
+ //done && done();
 });
 
 // Let us know that directory monitoring is happening and where.
