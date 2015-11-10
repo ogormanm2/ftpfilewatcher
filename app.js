@@ -76,33 +76,8 @@ simMonitor.on("fileAdded", function (fileDetail) {
     debugMode: true // defaults to "@anonymous"
   });
 
-  console.log("Calling Upload: " + fileDetail.fullPath); 
-  Ftp.put(fileDetail.fullPath, fileDetail.fileName, function (err) {
-    if (!err) {
-      console.log("upload success");
-      // add code to fileDetail.fullPathupdate audit log of success
-      var newpath = fileDetail.fullPath.replace(/\\/g, '\\\\');
-      var newfile = fileDetail.fileName.replace(/\\/g, '\\\\');
-      cqlCmd = "INSERT INTO ftpfileaudit (job,path,filename,status,datecreated) VALUES " +
-      "(1,'" + newpath + "','" + newfile + "','complete','" + moment().format() + "')";
-     //cqlCmd = "DELETE FROM ftpfileaudit WHERE path = 'test'"
-     client.execute(cqlCmd, function (err, result) {
-           if (!err) {
-               console.log("Audit Updated.");
-           } else {
-               console.log("Audit update failed. Error:", err)
-           }
-       });
-      
-    }
-    else {
-      console.log("upload failure");
-      // add queuing code to try again and audit log of failed job pending 
-      // (including file and date of attempt and # tries)
-      retryFTP('ftpRetry', fileDetail.fullPath, fileDetail.fileName);
-
-    }
-  });
+  console.log("Calling Upload Job: " + fileDetail.fullPath); 
+  retryFTP('ftpRetry', fileDetail.fullPath, fileDetail.fileName);
  
 });
 
@@ -120,11 +95,18 @@ function retryFTP (name, path, fileName){
      console.log('Job', job.id, 'with name', job.data.name, 'is    done');
      var newpath = path.replace(/\\/g, '\\\\');
      var newfile = fileName.replace(/\\/g, '\\\\');
-     cqlCmd = "INSERT INTO ftpfileaudit (job,path,filename,status,datecreated) VALUES (" +
-      job.id + ",'" + path + "','" + fileName + "','complete','" + Date() + "')";
-     client.execute(cqlCmd, function (err, result) {
+     //cqlCmd = "INSERT INTO ftpfileaudit (job,path,filename,status,datecreated) VALUES (" +
+     // job.id + ",'" + path + "','" + fileName + "','complete','" + Date() + "')";
+     //client.execute(cqlCmd, function (err, result) {
+     // CQL insert statement
+      var query = 'INSERT INTO ftpfileaudit (job,path,filename,status,datecreated) VALUES (?,?,?,?,?)';
+      // Parameters by marker position
+      var params = [job.id, newpath, newfile, 'complete', moment().format()];
+      client.execute(query, params, { prepare: true }, function (err, result) {
            if (!err) {
                console.log("Audit Updated.");
+           } else {
+               console.log("Audit update failed. Error:", err)
            }
        });
    })
@@ -132,11 +114,15 @@ function retryFTP (name, path, fileName){
      console.log('Job', job.id, 'with name', job.data.name, 'has  failed');
      var newpath = path.replace(/\\/g, '\\\\');
      var newfile = fileName.replace(/\\/g, '\\\\');
-     cqlCmd = "INSERT INTO ftpfileaudit (job,path,filename,status,datecreated) VALUES (" +
-      job.id + ",'" + path + "','" + fileName + "','failed','" + Date() + "')";
-     client.execute(cqlCmd, function (err, result) {
+     // CQL insert statement
+      var query = 'INSERT INTO ftpfileaudit (job,path,filename,status,datecreated) VALUES (?,?,?,?,?)';
+      // Parameters by marker position
+      var params = [job.id, newpath, newfile, 'failed', moment().format()];
+      client.execute(query, params, { prepare: true }, function (err, result) {
            if (!err) {
                console.log("Audit Updated.");
+           } else {
+               console.log("Audit update failed. Error:", err)
            }
        });
    });
